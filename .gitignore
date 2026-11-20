@@ -1,0 +1,25 @@
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# SQLite
+*.db
+*.sqlite3
+
+# Dataset
+south/dataset/*.csv
+
+# Node
+north/node_modules/
+north/dist/
+
+# Environment
+.env
+.env.*
+
+# IDE and OS
+.vscode/
+.DS_Store
+Thumbs.db
