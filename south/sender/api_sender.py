@@ -5,6 +5,7 @@ import requests
 from dataset_reader import load_ppg_signal, create_batches
 
 API_URL = "http://127.0.0.1:8000/api/ppg/batch"
+COMPLETE_URL = "http://127.0.0.1:8000/api/ppg/complete"
 BATCH_INTERVAL = 2
 
 
@@ -30,7 +31,6 @@ def send_batches():
             )
 
             response.raise_for_status()
-
             result = response.json()
 
             successful_batches += 1
@@ -53,6 +53,19 @@ def send_batches():
     print(f"Successful batches: {successful_batches}")
     print(f"Failed batches: {failed_batches}")
     print(f"Total batches: {len(batches)}")
+
+    if failed_batches == 0:
+        try:
+            response = requests.post(
+                COMPLETE_URL,
+                timeout=10
+            )
+            response.raise_for_status()
+
+            print("\nPPG TRANSMISSION COMPLETED SUCCESSFULLY")
+
+        except requests.RequestException as error:
+            print(f"Could not update transmission status: {error}")
 
 
 if __name__ == "__main__":

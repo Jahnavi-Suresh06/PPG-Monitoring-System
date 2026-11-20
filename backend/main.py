@@ -19,7 +19,7 @@ app = FastAPI(
     description="REST API for receiving and retrieving PPG waveform batches",
     version="1.0.0"
 )
-
+transmission_completed = False
 
 class PPGBatch(BaseModel):
     batch_id: int
@@ -60,6 +60,22 @@ def initialize_database():
 def startup_event():
     initialize_database()
 
+@app.get("/api/ppg/status")
+def get_transmission_status():
+    return {
+        "transmission_completed": transmission_completed
+    }
+
+@app.post("/api/ppg/complete")
+def complete_transmission():
+    global transmission_completed
+
+    transmission_completed = True
+
+    return {
+        "message": "PPG transmission completed",
+        "transmission_completed": True
+    }
 
 @app.get("/")
 def home():
