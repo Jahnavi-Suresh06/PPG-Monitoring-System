@@ -1,11 +1,21 @@
 
+import os
 import time
 import requests
 
 from dataset_reader import load_ppg_signal, create_batches
 
-API_URL = "http://127.0.0.1:8000/api/ppg/batch"
-COMPLETE_URL = "http://127.0.0.1:8000/api/ppg/complete"
+
+API_URL = os.getenv(
+    "PPG_API_URL",
+    "http://127.0.0.1:8000/api/ppg/batch"
+)
+
+COMPLETE_URL = os.getenv(
+    "PPG_COMPLETE_URL",
+    API_URL.rsplit("/", 1)[0] + "/complete"
+)
+
 BATCH_INTERVAL = 2
 
 
@@ -35,11 +45,15 @@ def send_batches():
 
             successful_batches += 1
 
-            print(
-                f"Batch {batch['batch_id']} sent successfully | "
-                f"Samples: {result['samples_received']} | "
-                f"Start time: {batch['start_time']}s"
-            )
+            print("\n========== PPG BATCH CONFIRMATION ==========")
+            print(f"Record ID: {result['record_id']}")
+            print(f"Batch ID: {result['batch_id']}")
+            print(f"Start Time: {result['start_time']} sec")
+            print(f"Sampling Frequency: {result['sampling_frequency']} Hz")
+            print(f"Samples Received: {result['samples_received']}")
+            print(f"First 10 Samples: {result['samples']}")
+            print("Status: Successfully received and stored")
+            print("============================================")
 
         except requests.RequestException as error:
             failed_batches += 1

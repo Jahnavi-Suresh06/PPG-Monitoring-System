@@ -7,19 +7,30 @@ from datetime import datetime, timezone
 from typing import List
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATABASE_PATH = PROJECT_ROOT / "ppg_monitoring.db"
 
+transmission_completed = False
 
 app = FastAPI(
     title="PPG Monitoring System API",
     description="REST API for receiving and retrieving PPG waveform batches",
     version="1.0.0"
 )
-transmission_completed = False
+
+# CORS configuration for frontend communication
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 class PPGBatch(BaseModel):
     batch_id: int
@@ -60,11 +71,13 @@ def initialize_database():
 def startup_event():
     initialize_database()
 
+
 @app.get("/api/ppg/status")
 def get_transmission_status():
     return {
         "transmission_completed": transmission_completed
     }
+
 
 @app.post("/api/ppg/complete")
 def complete_transmission():
@@ -76,6 +89,7 @@ def complete_transmission():
         "message": "PPG transmission completed",
         "transmission_completed": True
     }
+
 
 @app.get("/")
 def home():
@@ -141,8 +155,10 @@ def receive_ppg_batch(batch: PPGBatch):
         "status": "success",
         "record_id": record_id,
         "batch_id": batch.batch_id,
+        "start_time": batch.start_time,
+        "sampling_frequency": batch.sampling_frequency,
         "samples_received": batch.sample_count,
-        "start_time": batch.start_time
+        "samples": batch.samples[:10]
     }
 
 
