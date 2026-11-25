@@ -11,7 +11,7 @@ from dataset_reader import load_ppg_signal, create_batches
 # MQTT CONFIGURATION
 # ==========================================
 
-BROKER = "10.104.202.99"
+BROKER = "10.104.202.164"
 PORT = 1883
 
 TOPIC = "physicalai/ppg"
