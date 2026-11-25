@@ -3,13 +3,10 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   Activity,
-  HeartPulse,
   Gauge,
   Database,
   Wifi,
   WifiOff,
-  RefreshCw,
-  Waves,
   Play,
   Pause,
   Square,
@@ -107,7 +104,7 @@ function App() {
     };
   }, []);
 
-  // FETCH EXISTING FILTERED PPG DATASET
+  // FETCH FILTERED PPG DATASET
 
   useEffect(() => {
     let active = true;
@@ -130,8 +127,7 @@ function App() {
         if (
           receivedWaveform.length > 0 &&
           receivedWaveform.some(
-            (point) =>
-              typeof point.ppg_filtered !== "number"
+            (point) => typeof point.ppg_filtered !== "number"
           )
         ) {
           throw new Error("Filtered PPG data is missing from API response");
@@ -210,7 +206,7 @@ function App() {
     setPlaybackIndex(0);
   };
 
-  // CREATE ROLLING 10-SECOND FILTERED CHART WINDOW
+  // CREATE ROLLING 10-SECOND CHART WINDOW
 
   const chartData = useMemo(() => {
     if (waveform.length === 0) return [];
@@ -258,8 +254,6 @@ function App() {
       ? "Playback running"
       : "Playback paused";
 
-  // FRONTEND
-
   return (
     <div className="app-shell">
 
@@ -282,16 +276,6 @@ function App() {
         <div className="nav-item active">
           <Gauge size={19} />
           Dashboard
-        </div>
-
-        <div className="nav-item">
-          <Waves size={19} />
-          Signal Monitoring
-        </div>
-
-        <div className="nav-item">
-          <Database size={19} />
-          Data Batches
         </div>
 
         <div className="sidebar-bottom">
@@ -326,7 +310,10 @@ function App() {
               Device {deviceOn ? "ON" : "OFF"}
             </button>
 
-            <div className={`connection ${connected ? "connected" : "disconnected"}`}>
+            <div
+              className={`connection ${connected ? "connected" : "disconnected"
+                }`}
+            >
               {connected ? <Wifi size={17} /> : <WifiOff size={17} />}
               {connected ? "API Connected" : "API Disconnected"}
             </div>
@@ -362,13 +349,6 @@ function App() {
             value={`${samplingFrequency} Hz`}
             note="PPG signal sampling rate"
           />
-
-          <MetricCard
-            icon={<HeartPulse />}
-            label="Signal Quality (SQI)"
-            value="Pending"
-            note="Awaiting validated SQI calculation"
-          />
         </section>
 
         {/* WAVEFORM AND DETAILS */}
@@ -394,8 +374,8 @@ function App() {
             {/* PLAYBACK CONTROLS */}
 
             <div className="playback-controls">
-
               <div className="playback-buttons">
+
                 <button
                   className="control-button play-button"
                   onClick={handlePlay}
@@ -435,6 +415,7 @@ function App() {
                   <RotateCcw size={16} />
                   Reset
                 </button>
+
               </div>
 
               <div className="playback-time">
@@ -524,7 +505,6 @@ function App() {
                         isAnimationActive={false}
                         connectNulls={false}
                       />
-
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -600,71 +580,10 @@ function App() {
           </div>
         </section>
 
-        {/* BATCH HISTORY */}
-
-        <section className="panel table-panel">
-          <div className="panel-heading">
-            <div>
-              <h2>Received Batch History</h2>
-              <p>Data retrieved from the FastAPI backend</p>
-            </div>
-
-            <button
-              className="refresh-button"
-              onClick={() => window.location.reload()}
-            >
-              <RefreshCw size={15} />
-              Refresh
-            </button>
-          </div>
-
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Record ID</th>
-                  <th>Batch ID</th>
-                  <th>Start Time</th>
-                  <th>Duration</th>
-                  <th>Samples</th>
-                  <th>Frequency</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {[...batches].reverse().slice(0, 10).map((batch) => (
-                  <tr key={batch.record_id}>
-                    <td>#{batch.record_id}</td>
-                    <td>{batch.batch_id}</td>
-                    <td>{batch.start_time} sec</td>
-                    <td>{batch.duration_seconds} sec</td>
-                    <td>{batch.sample_count}</td>
-                    <td>{batch.sampling_frequency} Hz</td>
-
-                    <td>
-                      <span className="received-badge">
-                        Received
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-
-                {batches.length === 0 && (
-                  <tr>
-                    <td colSpan="7" className="empty-table">
-                      No batches received yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
         <footer>
-          PAI Edge · PPG Monitoring System · Batch refresh every 2 seconds
+          PAI Edge · PPG Monitoring System
         </footer>
+
       </main>
     </div>
   );
