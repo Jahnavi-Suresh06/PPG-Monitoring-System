@@ -25,7 +25,6 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
-  Legend,
 } from "recharts";
 
 import "./App.css";
@@ -108,7 +107,7 @@ function App() {
     };
   }, []);
 
-  // FETCH COMPLETE PPG WAVEFORM
+  // FETCH EXISTING FILTERED PPG DATASET
 
   useEffect(() => {
     let active = true;
@@ -130,12 +129,12 @@ function App() {
 
         if (
           receivedWaveform.length > 0 &&
-          (
-            typeof receivedWaveform[0].ppg_raw !== "number" ||
-            typeof receivedWaveform[0].ppg_filtered !== "number"
+          receivedWaveform.some(
+            (point) =>
+              typeof point.ppg_filtered !== "number"
           )
         ) {
-          throw new Error("Raw or filtered PPG data is missing from API response");
+          throw new Error("Filtered PPG data is missing from API response");
         }
 
         setWaveform(receivedWaveform);
@@ -162,7 +161,7 @@ function App() {
     };
   }, []);
 
-  // CONTINUOUS RECORDED WAVEFORM PLAYBACK
+  // FILTERED WAVEFORM PLAYBACK
 
   useEffect(() => {
     if (!deviceOn || !isPlaying || waveform.length === 0) {
@@ -211,7 +210,7 @@ function App() {
     setPlaybackIndex(0);
   };
 
-  // CREATE ROLLING 10-SECOND CHART WINDOW
+  // CREATE ROLLING 10-SECOND FILTERED CHART WINDOW
 
   const chartData = useMemo(() => {
     if (waveform.length === 0) return [];
@@ -226,9 +225,8 @@ function App() {
       playbackIndex + 1
     );
 
-    return visibleSamples.map((point, index) => ({
-      time: index / SAMPLING_FREQUENCY,
-      raw: point.ppg_raw,
+    return visibleSamples.map((point) => ({
+      time: point.time_seconds,
       filtered: point.ppg_filtered,
     }));
   }, [waveform, playbackIndex]);
@@ -315,7 +313,7 @@ function App() {
             <h1>PPG Dashboard</h1>
 
             <p className="subtitle">
-              Monitor PPG signals, waveform processing and data transmission
+              Monitor filtered PPG signals and data transmission
             </p>
           </div>
 
@@ -348,14 +346,14 @@ function App() {
             icon={<Database />}
             label="Total Samples"
             value={totalSamples.toLocaleString()}
-            note="Samples in complete PPG signal"
+            note="Samples in filtered PPG dataset"
           />
 
           <MetricCard
             icon={<Activity />}
             label="Signal Duration"
             value={`${duration} sec`}
-            note="Complete recorded waveform"
+            note="Complete filtered waveform"
           />
 
           <MetricCard
@@ -377,14 +375,14 @@ function App() {
 
         <section className="content-grid">
 
-          {/* PPG WAVEFORM */}
+          {/* FILTERED PPG WAVEFORM */}
 
           <div className="panel waveform-panel">
 
             <div className="panel-heading">
               <div>
-                <h2>PPG Waveform Monitoring</h2>
-                <p>Raw and Filtered PPG signals · Rolling 10-second window</p>
+                <h2>Filtered PPG Waveform</h2>
+                <p>Filtered PPG signal · Rolling 10-second window</p>
               </div>
 
               <span className="live-label">
@@ -455,14 +453,14 @@ function App() {
               <>
                 <div className="waveform-status">
                   <span className="waveform-indicator" />
-                  <span>RAW + FILTERED PPG</span>
+                  <span>FILTERED PPG</span>
 
                   <span className="waveform-time">
                     Recording time: {currentPlaybackTime.toFixed(2)} sec
                   </span>
                 </div>
 
-                {/* PPG CHART */}
+                {/* FILTERED PPG CHART */}
 
                 <div className="chart-area">
                   <ResponsiveContainer width="100%" height="100%">
@@ -483,10 +481,9 @@ function App() {
                       <XAxis
                         dataKey="time"
                         type="number"
-                        domain={[0, WINDOW_SECONDS]}
+                        domain={["dataMin", "dataMax"]}
                         tick={{ fontSize: 11 }}
                         tickFormatter={(value) => value.toFixed(0)}
-                        allowDataOverflow={true}
                         label={{
                           value: "Time (seconds)",
                           position: "insideBottom",
@@ -507,35 +504,15 @@ function App() {
                         }}
                       />
 
-                      <Legend
-                        verticalAlign="top"
-                        height={36}
-                      />
-
                       <Tooltip
                         labelFormatter={(value) =>
                           `Time: ${Number(value).toFixed(2)} sec`
                         }
-                        formatter={(value, name) => [
+                        formatter={(value) => [
                           Number(value).toFixed(5),
-                          name,
+                          "Filtered PPG",
                         ]}
                       />
-
-                      {/* RAW PPG LINE */}
-
-                      <Line
-                        type="linear"
-                        dataKey="raw"
-                        name="Raw PPG"
-                        stroke="#16856b"
-                        strokeWidth={2}
-                        dot={false}
-                        isAnimationActive={false}
-                        connectNulls={false}
-                      />
-
-                      {/* FILTERED PPG LINE */}
 
                       <Line
                         type="linear"
@@ -553,11 +530,11 @@ function App() {
                 </div>
 
                 <div className="waveform-footer">
-                  Showing {chartData.length.toLocaleString()} raw and filtered samples
+                  Showing {chartData.length.toLocaleString()} filtered PPG samples
                   {" · "}
                   {WINDOW_SECONDS}-second moving window
                   {" · "}
-                  {SAMPLING_FREQUENCY} Hz
+                  {samplingFrequency} Hz
                 </div>
               </>
             ) : (
@@ -566,12 +543,12 @@ function App() {
 
                 <h3>
                   {waveformLoading
-                    ? "Loading PPG waveform..."
-                    : "No waveform data available"}
+                    ? "Loading filtered PPG waveform..."
+                    : "No filtered waveform data available"}
                 </h3>
 
                 <p>
-                  Check the waveform API and processed signal CSV.
+                  Check the waveform API and filtered signal CSV.
                 </p>
               </div>
             )}
