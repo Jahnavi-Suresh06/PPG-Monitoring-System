@@ -27,7 +27,7 @@ import {
 
 import "./App.css";
 
-const API_URL = "http://10.104.202.164:8000";
+const API_URL = "http://10.97.138.21:8000";
 
 const SAMPLING_FREQUENCY = 125;
 const WINDOW_SECONDS = 10;
@@ -54,19 +54,7 @@ function App() {
   const [deviceOn, setDeviceOn] = useState(true);
   const [isPlaying, setIsPlaying] = useState(true);
 
-  const playbackChannelRef = useRef(null);
-
-  const playbackStateRef = useRef({
-    playbackIndex: 0,
-    deviceOn: true,
-    isPlaying: true,
-  });
-
-  playbackStateRef.current = {
-    playbackIndex,
-    deviceOn,
-    isPlaying,
-  };
+  const playbackSocketRef = useRef(null);
 
   // FETCH CURRENT RECORDING ANALYSIS
   useEffect(() => {
@@ -210,129 +198,77 @@ function App() {
     };
   }, []);
 
-  // PLAYBACK SYNCHRONIZATION CHANNEL
+  // CONNECT TO THE SHARED BACKEND PLAYBACK CONTROLLER
   useEffect(() => {
-    if (typeof BroadcastChannel === "undefined") return;
+    if (waveform.length === 0) return;
 
-    const channel = new BroadcastChannel("ppg-playback-sync");
+    const socket = new WebSocket("ws://10.104.202.164:8000/ws/playback");
+    playbackSocketRef.current = socket;
 
-    playbackChannelRef.current = channel;
+    socket.onopen = () => {
+      socket.send(JSON.stringify({
+        action: "REGISTER",
+        waveform_length: waveform.length,
+      }));
+    };
 
-    channel.onmessage = (event) => {
-      const message = event.data;
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type !== "PLAYBACK_STATE") return;
 
-      if (message?.type === "SYNC_REQUEST") {
-        channel.postMessage({
-          type: "PLAYBACK_STATE",
-          ...playbackStateRef.current,
-        });
-
-        return;
-      }
-
-      if (message?.type !== "PLAYBACK_COMMAND") return;
-
-      const current = playbackStateRef.current;
-
-      switch (message.action) {
-        case "PLAY":
-          if (current.deviceOn && waveform.length > 0) {
-            setIsPlaying(true);
-          }
-          break;
-
-        case "PAUSE":
-          setIsPlaying(false);
-          break;
-
-        case "STOP":
-          setIsPlaying(false);
+        if (typeof message.playback_index === "number") {
           setPlaybackIndex(
-            Math.min(WINDOW_SIZE - 1, waveform.length - 1)
+            Math.max(0, Math.min(message.playback_index, waveform.length - 1))
           );
-          break;
+        }
 
-        case "RESET":
-          setIsPlaying(false);
-          setPlaybackIndex(0);
-          break;
+        if (typeof message.device_on === "boolean") {
+          setDeviceOn(message.device_on);
+        }
 
-        case "TOGGLE_DEVICE":
-          if (current.deviceOn) {
-            setDeviceOn(false);
-            setIsPlaying(false);
-          } else {
-            setDeviceOn(true);
-          }
-          break;
+        if (typeof message.is_playing === "boolean") {
+          setIsPlaying(message.is_playing);
+        }
+      } catch (err) {
+        console.error("Invalid playback state received:", err);
+      }
+    };
 
-        default:
-          break;
+    socket.onerror = () => {
+      console.error("Playback WebSocket connection error");
+    };
+
+    socket.onclose = () => {
+      if (playbackSocketRef.current === socket) {
+        playbackSocketRef.current = null;
       }
     };
 
     return () => {
-      channel.close();
-      playbackChannelRef.current = null;
+      socket.close();
+      if (playbackSocketRef.current === socket) {
+        playbackSocketRef.current = null;
+      }
     };
   }, [waveform.length]);
 
-  // BROADCAST PLAYBACK STATE
-  useEffect(() => {
-    playbackChannelRef.current?.postMessage({
-      type: "PLAYBACK_STATE",
-      playbackIndex,
-      deviceOn,
-      isPlaying,
-    });
-  }, [playbackIndex, deviceOn, isPlaying]);
+  // SEND PLAYBACK COMMANDS TO THE BACKEND
+  const sendPlaybackCommand = (action) => {
+    const socket = playbackSocketRef.current;
 
-  // AUTOMATIC PLAYBACK
-  useEffect(() => {
-    if (!deviceOn || !isPlaying || waveform.length === 0) {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setPlaybackIndex((previousIndex) => {
-        return (previousIndex + PLAYBACK_STEP) % waveform.length;
-      });
-    }, PLAYBACK_INTERVAL);
-
-    return () => clearInterval(interval);
-  }, [deviceOn, isPlaying, waveform.length]);
-
-  // PLAYBACK CONTROLS
-  const handleDeviceToggle = () => {
-    if (deviceOn) {
-      setDeviceOn(false);
-      setIsPlaying(false);
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ action }));
     } else {
-      setDeviceOn(true);
+      console.warn("Playback connection is not ready yet");
     }
   };
 
-  const handlePlay = () => {
-    if (deviceOn && waveform.length > 0) {
-      setIsPlaying(true);
-    }
-  };
-
-  const handlePause = () => {
-    setIsPlaying(false);
-  };
-
-  const handleStop = () => {
-    setIsPlaying(false);
-    setPlaybackIndex(
-      Math.min(WINDOW_SIZE - 1, waveform.length - 1)
-    );
-  };
-
-  const handleReset = () => {
-    setIsPlaying(false);
-    setPlaybackIndex(0);
-  };
+  const handleDeviceToggle = () => sendPlaybackCommand("TOGGLE_DEVICE");
+  const handlePlay = () => sendPlaybackCommand("PLAY");
+  const handlePause = () => sendPlaybackCommand("PAUSE");
+  const handleStop = () => sendPlaybackCommand("STOP");
+  const handleReset = () => sendPlaybackCommand("RESET");
 
   // ROLLING WAVEFORM WINDOW
   const chartData = useMemo(() => {

@@ -29,7 +29,7 @@ import {
 
 import "./ServerDashboard.css";
 
-const API_URL = "http://127.0.0.1:8000";
+const API_URL = "http://localhost:8000";
 
 const SAMPLING_FREQUENCY = 125;
 const WINDOW_SECONDS = 10;
@@ -57,12 +57,13 @@ export default function ServerDashboard() {
   const [waveformLoading, setWaveformLoading] = useState(true);
 
   const [deviceOn, setDeviceOn] = useState(true);
-  const [isPlaying, setIsPlaying] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
 
   const [lastUpdated, setLastUpdated] = useState(null);
   const [showPayload, setShowPayload] = useState(false);
 
-  const playbackChannelRef = useRef(null);
+  const playbackSocketRef = useRef(null);
+  const pendingPlaybackCommandRef = useRef(null);
 
   // FETCH CURRENT RECORDING ANALYSIS
   useEffect(() => {
@@ -227,72 +228,92 @@ export default function ServerDashboard() {
     };
   }, []);
 
-  // RECEIVE PLAYBACK STATE FROM CLIENT DASHBOARD
+  // CONNECT TO THE SHARED BACKEND PLAYBACK CONTROLLER
   useEffect(() => {
-    if (typeof BroadcastChannel === "undefined") return;
+    if (waveform.length === 0) return;
 
-    const channel = new BroadcastChannel("ppg-playback-sync");
+    const socket = new WebSocket("ws://10.104.202.164:8000/ws/playback");
+    playbackSocketRef.current = socket;
 
-    playbackChannelRef.current = channel;
+    socket.onopen = () => {
+      socket.send(JSON.stringify({
+        action: "REGISTER",
+        waveform_length: waveform.length,
+      }));
 
-    channel.onmessage = (event) => {
-      const message = event.data;
-
-      if (message?.type !== "PLAYBACK_STATE") return;
-
-      if (typeof message.playbackIndex === "number") {
-        setPlaybackIndex(
-          Math.max(
-            0,
-            Math.min(
-              message.playbackIndex,
-              Math.max(0, waveform.length - 1)
-            )
-          )
-        );
-      }
-
-      if (typeof message.deviceOn === "boolean") {
-        setDeviceOn(message.deviceOn);
-      }
-
-      if (typeof message.isPlaying === "boolean") {
-        setIsPlaying(message.isPlaying);
+      // Apply the latest button command if it was clicked while connecting.
+      const pendingAction = pendingPlaybackCommandRef.current;
+      if (pendingAction) {
+        socket.send(JSON.stringify({ action: pendingAction }));
+        pendingPlaybackCommandRef.current = null;
       }
     };
 
-    channel.postMessage({
-      type: "SYNC_REQUEST",
-    });
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type !== "PLAYBACK_STATE") return;
+
+        if (typeof message.playback_index === "number") {
+          setPlaybackIndex(
+            Math.max(0, Math.min(message.playback_index, waveform.length - 1))
+          );
+        }
+
+        if (typeof message.device_on === "boolean") {
+          setDeviceOn(message.device_on);
+        }
+
+        if (typeof message.is_playing === "boolean") {
+          setIsPlaying(message.is_playing);
+        }
+      } catch (err) {
+        console.error("Invalid playback state received:", err);
+      }
+    };
+
+    socket.onerror = () => {
+      console.error("Playback WebSocket connection error");
+    };
+
+    socket.onclose = () => {
+      if (playbackSocketRef.current === socket) {
+        playbackSocketRef.current = null;
+      }
+    };
 
     return () => {
-      channel.close();
-      playbackChannelRef.current = null;
+      socket.close();
+      if (playbackSocketRef.current === socket) {
+        playbackSocketRef.current = null;
+      }
     };
   }, [waveform.length]);
 
-  // PLAYBACK COMMANDS
+  // SEND PLAYBACK COMMANDS TO THE BACKEND
   const sendPlaybackCommand = (action) => {
-    playbackChannelRef.current?.postMessage({
-      type: "PLAYBACK_COMMAND",
-      action,
-    });
+    const socket = playbackSocketRef.current;
+
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ action }));
+      return;
+    }
+
+    if (socket && socket.readyState === WebSocket.CONNECTING) {
+      pendingPlaybackCommandRef.current = action;
+      return;
+    }
+
+    console.error(
+      "Playback WebSocket is not connected. Check that the backend is running and reachable."
+    );
   };
 
-  const handleDeviceToggle = () =>
-    sendPlaybackCommand("TOGGLE_DEVICE");
-
-  const handlePlay = () =>
-    sendPlaybackCommand("PLAY");
-
-  const handlePause = () =>
-    sendPlaybackCommand("PAUSE");
-
-  const handleStop = () =>
-    sendPlaybackCommand("STOP");
-
-  const handleReset = () =>
-    sendPlaybackCommand("RESET");
+  const handleDeviceToggle = () => sendPlaybackCommand("TOGGLE_DEVICE");
+  const handlePlay = () => sendPlaybackCommand("PLAY");
+  const handlePause = () => sendPlaybackCommand("PAUSE");
+  const handleStop = () => sendPlaybackCommand("STOP");
+  const handleReset = () => sendPlaybackCommand("RESET");
 
   // CHART DATA
   const chartData = useMemo(() => {
