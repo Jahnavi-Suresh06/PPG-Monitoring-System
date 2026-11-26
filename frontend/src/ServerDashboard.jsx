@@ -232,8 +232,7 @@ export default function ServerDashboard() {
   useEffect(() => {
     if (waveform.length === 0) return;
 
-    const socket = new WebSocket("ws://10.104.202.164:8000/ws/playback");
-    playbackSocketRef.current = socket;
+    const socket = new WebSocket("ws://localhost:8000/ws/playback"); playbackSocketRef.current = socket;
 
     socket.onopen = () => {
       socket.send(JSON.stringify({

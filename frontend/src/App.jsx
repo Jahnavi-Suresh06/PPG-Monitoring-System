@@ -27,7 +27,7 @@ import {
 
 import "./App.css";
 
-const API_URL = "http://10.97.138.21:8000";
+const API_URL = "http://localhost:8000";
 
 const SAMPLING_FREQUENCY = 125;
 const WINDOW_SECONDS = 10;
@@ -202,8 +202,7 @@ function App() {
   useEffect(() => {
     if (waveform.length === 0) return;
 
-    const socket = new WebSocket("ws://10.104.202.164:8000/ws/playback");
-    playbackSocketRef.current = socket;
+    const socket = new WebSocket("ws://localhost:8000/ws/playback"); playbackSocketRef.current = socket;
 
     socket.onopen = () => {
       socket.send(JSON.stringify({
