@@ -1,5 +1,5 @@
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Activity,
@@ -12,6 +12,7 @@ import {
   Square,
   RotateCcw,
   Power,
+  HeartPulse,
 } from "lucide-react";
 
 import {
@@ -38,12 +39,14 @@ const PLAYBACK_INTERVAL = 40;
 function App() {
   const [batches, setBatches] = useState([]);
   const [waveform, setWaveform] = useState([]);
-  const [playbackIndex, setPlaybackIndex] = useState(0);
   const [waveformInfo, setWaveformInfo] = useState(null);
+  const [analysisData, setAnalysisData] = useState(null);
 
+  const [playbackIndex, setPlaybackIndex] = useState(0);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState("");
   const [waveformError, setWaveformError] = useState("");
+  const [analysisError, setAnalysisError] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [waveformLoading, setWaveformLoading] = useState(true);
@@ -51,8 +54,56 @@ function App() {
   const [deviceOn, setDeviceOn] = useState(true);
   const [isPlaying, setIsPlaying] = useState(true);
 
-  // FETCH RECEIVED BATCHES
+  const playbackChannelRef = useRef(null);
 
+  const playbackStateRef = useRef({
+    playbackIndex: 0,
+    deviceOn: true,
+    isPlaying: true,
+  });
+
+  playbackStateRef.current = {
+    playbackIndex,
+    deviceOn,
+    isPlaying,
+  };
+
+  // FETCH CURRENT RECORDING ANALYSIS
+  useEffect(() => {
+    let active = true;
+
+    const fetchAnalysis = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/ppg/analysis`);
+
+        if (!response.ok) {
+          throw new Error(`Analysis API returned ${response.status}`);
+        }
+
+        const result = await response.json();
+
+        if (!active) return;
+
+        setAnalysisData(result);
+        setAnalysisError("");
+      } catch (err) {
+        if (active) {
+          setAnalysisError(err.message);
+        }
+      }
+    };
+
+    fetchAnalysis();
+
+    const interval = setInterval(fetchAnalysis, 5000);
+
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // FETCH RECEIVED BATCHES
   useEffect(() => {
     let active = true;
     let lastRecordId = 0;
@@ -60,7 +111,7 @@ function App() {
     const fetchBatches = async () => {
       try {
         const response = await fetch(
-          `${API_URL}/api/ppg/batches?after_id=${lastRecordId}&limit=20`
+          `${API_URL}/api/ppg/batches?after_id=${lastRecordId}&limit=500`
         );
 
         if (!response.ok) {
@@ -104,8 +155,7 @@ function App() {
     };
   }, []);
 
-  // FETCH FILTERED PPG DATASET
-
+  // FETCH FILTERED PPG WAVEFORM
   useEffect(() => {
     let active = true;
 
@@ -130,14 +180,17 @@ function App() {
             (point) => typeof point.ppg_filtered !== "number"
           )
         ) {
-          throw new Error("Filtered PPG data is missing from API response");
+          throw new Error("Filtered PPG data is missing");
         }
 
         setWaveform(receivedWaveform);
         setWaveformInfo(result);
 
         setPlaybackIndex(
-          Math.min(WINDOW_SIZE - 1, receivedWaveform.length - 1)
+          Math.max(
+            0,
+            Math.min(WINDOW_SIZE - 1, receivedWaveform.length - 1)
+          )
         );
 
         setWaveformError("");
@@ -157,8 +210,84 @@ function App() {
     };
   }, []);
 
-  // FILTERED WAVEFORM PLAYBACK
+  // PLAYBACK SYNCHRONIZATION CHANNEL
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return;
 
+    const channel = new BroadcastChannel("ppg-playback-sync");
+
+    playbackChannelRef.current = channel;
+
+    channel.onmessage = (event) => {
+      const message = event.data;
+
+      if (message?.type === "SYNC_REQUEST") {
+        channel.postMessage({
+          type: "PLAYBACK_STATE",
+          ...playbackStateRef.current,
+        });
+
+        return;
+      }
+
+      if (message?.type !== "PLAYBACK_COMMAND") return;
+
+      const current = playbackStateRef.current;
+
+      switch (message.action) {
+        case "PLAY":
+          if (current.deviceOn && waveform.length > 0) {
+            setIsPlaying(true);
+          }
+          break;
+
+        case "PAUSE":
+          setIsPlaying(false);
+          break;
+
+        case "STOP":
+          setIsPlaying(false);
+          setPlaybackIndex(
+            Math.min(WINDOW_SIZE - 1, waveform.length - 1)
+          );
+          break;
+
+        case "RESET":
+          setIsPlaying(false);
+          setPlaybackIndex(0);
+          break;
+
+        case "TOGGLE_DEVICE":
+          if (current.deviceOn) {
+            setDeviceOn(false);
+            setIsPlaying(false);
+          } else {
+            setDeviceOn(true);
+          }
+          break;
+
+        default:
+          break;
+      }
+    };
+
+    return () => {
+      channel.close();
+      playbackChannelRef.current = null;
+    };
+  }, [waveform.length]);
+
+  // BROADCAST PLAYBACK STATE
+  useEffect(() => {
+    playbackChannelRef.current?.postMessage({
+      type: "PLAYBACK_STATE",
+      playbackIndex,
+      deviceOn,
+      isPlaying,
+    });
+  }, [playbackIndex, deviceOn, isPlaying]);
+
+  // AUTOMATIC PLAYBACK
   useEffect(() => {
     if (!deviceOn || !isPlaying || waveform.length === 0) {
       return;
@@ -174,7 +303,6 @@ function App() {
   }, [deviceOn, isPlaying, waveform.length]);
 
   // PLAYBACK CONTROLS
-
   const handleDeviceToggle = () => {
     if (deviceOn) {
       setDeviceOn(false);
@@ -206,44 +334,56 @@ function App() {
     setPlaybackIndex(0);
   };
 
-  // CREATE ROLLING 10-SECOND CHART WINDOW
-
+  // ROLLING WAVEFORM WINDOW
   const chartData = useMemo(() => {
     if (waveform.length === 0) return [];
 
+    const safeIndex = Math.min(
+      playbackIndex,
+      waveform.length - 1
+    );
+
     const startIndex = Math.max(
       0,
-      playbackIndex - WINDOW_SIZE + 1
+      safeIndex - WINDOW_SIZE + 1
     );
 
-    const visibleSamples = waveform.slice(
-      startIndex,
-      playbackIndex + 1
-    );
-
-    return visibleSamples.map((point) => ({
-      time: point.time_seconds,
-      filtered: point.ppg_filtered,
-    }));
+    return waveform
+      .slice(startIndex, safeIndex + 1)
+      .map((point) => ({
+        time: point.time_seconds,
+        filtered: point.ppg_filtered,
+      }));
   }, [waveform, playbackIndex]);
 
   // DASHBOARD INFORMATION
-
   const latestBatch = batches.length
     ? batches[batches.length - 1]
     : null;
 
-  const totalSamples = waveformInfo?.total_samples || 0;
-
   const duration =
-    waveformInfo?.end_time != null
-      ? (
-        waveformInfo.end_time - waveformInfo.start_time
-      ).toFixed(1)
-      : "0";
+    analysisData?.recording?.duration_seconds != null
+      ? analysisData.recording.duration_seconds.toFixed(2)
+      : "--";
 
   const samplingFrequency =
-    waveformInfo?.sampling_frequency || SAMPLING_FREQUENCY;
+    analysisData?.recording?.sampling_frequency ??
+    SAMPLING_FREQUENCY;
+
+  const totalPulses =
+    analysisData?.pulse_analysis?.detected_pulses ?? "--";
+
+  const medianHeartRate =
+    analysisData?.pulse_analysis?.median_heart_rate_bpm;
+
+  const meanHeartRate =
+    analysisData?.pulse_analysis?.mean_heart_rate_bpm;
+
+  const pulseConsistency =
+    analysisData?.pulse_analysis?.pulse_consistency ?? "--";
+
+  const sqiStatus =
+    analysisData?.sqi?.status ?? "LOADING";
 
   const currentPlaybackTime =
     waveform[playbackIndex]?.time_seconds ?? 0;
@@ -256,9 +396,7 @@ function App() {
 
   return (
     <div className="app-shell">
-
       {/* SIDEBAR */}
-
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-icon">
@@ -285,17 +423,11 @@ function App() {
       </aside>
 
       {/* MAIN CONTENT */}
-
       <main className="main-content">
-
-        {/* HEADER */}
-
         <header className="topbar">
           <div>
             <p className="eyebrow">PATIENT MONITORING SYSTEM</p>
-
             <h1>PPG Dashboard</h1>
-
             <p className="subtitle">
               Monitor filtered PPG signals and data transmission
             </p>
@@ -303,7 +435,8 @@ function App() {
 
           <div className="topbar-actions">
             <button
-              className={`device-toggle ${deviceOn ? "device-on" : "device-off"}`}
+              className={`device-toggle ${deviceOn ? "device-on" : "device-off"
+                }`}
               onClick={handleDeviceToggle}
             >
               <Power size={17} />
@@ -326,60 +459,96 @@ function App() {
           </div>
         )}
 
-        {/* METRIC CARDS */}
+        {analysisError && (
+          <div className="error-banner">
+            Unable to load analysis: {analysisError}
+          </div>
+        )}
 
+        {/* METRIC CARDS */}
         <section className="metric-grid">
           <MetricCard
-            icon={<Database />}
-            label="Total Samples"
-            value={totalSamples.toLocaleString()}
-            note="Samples in filtered PPG dataset"
+            icon={<HeartPulse />}
+            label="Detected Pulses"
+            value={totalPulses}
+            note="Current recording"
           />
 
           <MetricCard
             icon={<Activity />}
             label="Signal Duration"
             value={`${duration} sec`}
-            note="Complete filtered waveform"
+            note="Calculated from sample count"
           />
 
           <MetricCard
             icon={<Gauge />}
             label="Sampling Frequency"
             value={`${samplingFrequency} Hz`}
-            note="PPG signal sampling rate"
+            note="PPG sampling rate"
+          />
+        </section>
+
+        {/* ADDITIONAL ANALYSIS */}
+        <section className="metric-grid">
+          <MetricCard
+            icon={<HeartPulse />}
+            label="Median Heart Rate"
+            value={
+              medianHeartRate != null
+                ? `${medianHeartRate.toFixed(2)} BPM`
+                : "--"
+            }
+            note={
+              meanHeartRate != null
+                ? `Mean: ${meanHeartRate.toFixed(2)} BPM`
+                : "Pulse interval analysis"
+            }
+          />
+
+          <MetricCard
+            icon={<Activity />}
+            label="Pulse Consistency"
+            value={pulseConsistency}
+            note="Exploratory CV thresholds"
+          />
+
+          <MetricCard
+            icon={<Gauge />}
+            label="SQI Status"
+            value={sqiStatus}
+            note="Preliminary engineering assessment"
           />
         </section>
 
         {/* WAVEFORM AND DETAILS */}
-
         <section className="content-grid">
-
-          {/* FILTERED PPG WAVEFORM */}
-
           <div className="panel waveform-panel">
-
             <div className="panel-heading">
               <div>
                 <h2>Filtered PPG Waveform</h2>
-                <p>Filtered PPG signal · Rolling 10-second window</p>
+                <p>
+                  Filtered PPG signal · Rolling 10-second window
+                </p>
               </div>
 
               <span className="live-label">
-                <span className={`status-dot ${deviceOn ? "online" : ""}`} />
+                <span
+                  className={`status-dot ${deviceOn ? "online" : ""}`}
+                />
                 {playbackStatus}
               </span>
             </div>
 
             {/* PLAYBACK CONTROLS */}
-
             <div className="playback-controls">
               <div className="playback-buttons">
-
                 <button
                   className="control-button play-button"
                   onClick={handlePlay}
-                  disabled={!deviceOn || waveform.length === 0 || isPlaying}
+                  disabled={
+                    !deviceOn || waveform.length === 0 || isPlaying
+                  }
                   title="Play"
                 >
                   <Play size={16} />
@@ -415,7 +584,6 @@ function App() {
                   <RotateCcw size={16} />
                   Reset
                 </button>
-
               </div>
 
               <div className="playback-time">
@@ -441,8 +609,6 @@ function App() {
                   </span>
                 </div>
 
-                {/* FILTERED PPG CHART */}
-
                 <div className="chart-area">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart
@@ -464,7 +630,9 @@ function App() {
                         type="number"
                         domain={["dataMin", "dataMax"]}
                         tick={{ fontSize: 11 }}
-                        tickFormatter={(value) => value.toFixed(0)}
+                        tickFormatter={(value) =>
+                          Number(value).toFixed(1)
+                        }
                         label={{
                           value: "Time (seconds)",
                           position: "insideBottom",
@@ -487,7 +655,7 @@ function App() {
 
                       <Tooltip
                         labelFormatter={(value) =>
-                          `Time: ${Number(value).toFixed(2)} sec`
+                          `Time: ${Number(value).toFixed(3)} sec`
                         }
                         formatter={(value) => [
                           Number(value).toFixed(5),
@@ -510,7 +678,8 @@ function App() {
                 </div>
 
                 <div className="waveform-footer">
-                  Showing {chartData.length.toLocaleString()} filtered PPG samples
+                  Showing {chartData.length.toLocaleString()} filtered PPG
+                  samples
                   {" · "}
                   {WINDOW_SECONDS}-second moving window
                   {" · "}
@@ -535,15 +704,20 @@ function App() {
           </div>
 
           {/* LATEST BATCH DETAILS */}
-
           <div className="panel details-panel">
             <h2>Latest Batch Details</h2>
 
             {latestBatch ? (
               <div className="details-list">
-                <Detail label="Batch ID" value={latestBatch.batch_id} />
+                <Detail
+                  label="Batch ID"
+                  value={latestBatch.batch_id}
+                />
 
-                <Detail label="Record ID" value={latestBatch.record_id} />
+                <Detail
+                  label="Record ID"
+                  value={latestBatch.record_id}
+                />
 
                 <Detail
                   label="Start Time"
@@ -580,17 +754,120 @@ function App() {
           </div>
         </section>
 
-        <footer>
-          PAI Edge · PPG Monitoring System
-        </footer>
+        {/* SIGNAL QUALITY DETAILS */}
+        <section className="panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Signal Quality Assessment</h2>
+              <p>
+                Preliminary engineering indicators — not clinically
+                validated
+              </p>
+            </div>
+          </div>
 
+          {analysisData ? (
+            <>
+              <div className="pulse-metrics">
+                <div className="pulse-metric">
+                  <span>SQI Status</span>
+                  <strong>{analysisData.sqi.status}</strong>
+                </div>
+
+                <div className="pulse-metric">
+                  <span>Interval CV</span>
+                  <strong>
+                    {analysisData.pulse_analysis.interval_cv_percent != null
+                      ? `${analysisData.pulse_analysis.interval_cv_percent.toFixed(2)}%`
+                      : "--"}
+                  </strong>
+                </div>
+
+                <div className="pulse-metric">
+                  <span>Amplitude CV</span>
+                  <strong>
+                    {analysisData.pulse_analysis.amplitude_cv_percent != null
+                      ? `${analysisData.pulse_analysis.amplitude_cv_percent.toFixed(2)}%`
+                      : "--"}
+                  </strong>
+                </div>
+
+                <div className="pulse-metric">
+                  <span>Filtered Signal Std</span>
+                  <strong>
+                    {analysisData.signal_quality.filtered_std.toFixed(5)}
+                  </strong>
+                </div>
+              </div>
+
+              <p className="muted">
+                {analysisData.sqi.message}
+              </p>
+            </>
+          ) : (
+            <p className="muted">
+              {analysisError || "Loading signal quality assessment..."}
+            </p>
+          )}
+        </section>
+
+        {/* RECEIVED BATCH HISTORY */}
+        <section className="panel">
+          <div className="panel-heading">
+            <div>
+              <h2>Received Batch History</h2>
+              <p>Batches received through the REST API</p>
+            </div>
+
+            <span className="batch-count-badge">
+              {batches.length} records
+            </span>
+          </div>
+
+          {batches.length > 0 ? (
+            <div className="server-table-wrapper">
+              <table className="server-table">
+                <thead>
+                  <tr>
+                    <th>Record ID</th>
+                    <th>Batch ID</th>
+                    <th>Samples</th>
+                    <th>Frequency</th>
+                    <th>Duration</th>
+                    <th>Received At</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {[...batches].slice(-10).reverse().map((batch) => (
+                    <tr key={batch.record_id}>
+                      <td>{batch.record_id}</td>
+                      <td>{batch.batch_id}</td>
+                      <td>{batch.sample_count}</td>
+                      <td>{batch.sampling_frequency} Hz</td>
+                      <td>{batch.duration_seconds} s</td>
+                      <td>{batch.received_at}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="muted">
+              {loading
+                ? "Loading batch history..."
+                : "No batch records available."}
+            </p>
+          )}
+        </section>
+
+        <footer>PAI Edge · PPG Monitoring System</footer>
       </main>
     </div>
   );
 }
 
 // METRIC CARD
-
 function MetricCard({ icon, label, value, note }) {
   return (
     <div className="metric-card">
@@ -606,12 +883,11 @@ function MetricCard({ icon, label, value, note }) {
 }
 
 // DETAIL ROW
-
 function Detail({ label, value }) {
   return (
     <div className="detail-row">
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong>{value ?? "--"}</strong>
     </div>
   );
 }
