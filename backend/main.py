@@ -1,20 +1,21 @@
-
-import sqlite3
 import json
+import os
 import csv
 import math
 import asyncio
 import time
 
-from fastapi import WebSocket, WebSocketDisconnect
-
+import mysql.connector
+from dotenv import load_dotenv
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import List
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 
 # --------------------------------------------------
@@ -22,8 +23,6 @@ from pydantic import BaseModel
 # --------------------------------------------------
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-DATABASE_PATH = PROJECT_ROOT / "ppg_monitoring.db"
 
 WAVEFORM_PATH = (
     PROJECT_ROOT
@@ -75,34 +74,73 @@ class PPGBatch(BaseModel):
 
 
 # --------------------------------------------------
-# DATABASE CONNECTION
+# MYSQL DATABASE CONNECTION
 # --------------------------------------------------
 
+class MySQLConnection:
+    """Compatibility wrapper for the existing execute/fetch query pattern."""
+
+    def __init__(self):
+        required_settings = ["DB_HOST", "DB_USER", "DB_PASSWORD", "DB_NAME"]
+        missing = [key for key in required_settings if not os.getenv(key)]
+        if missing:
+            raise RuntimeError(
+                "Missing MySQL settings in .env: " + ", ".join(missing)
+            )
+
+        self.connection = mysql.connector.connect(
+            host=os.getenv("DB_HOST"),
+            port=int(os.getenv("DB_PORT", "3307")),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            database=os.getenv("DB_NAME"),
+        )
+
+    def execute(self, query, params=None):
+        cursor = self.connection.cursor(dictionary=True)
+        cursor.execute(query.replace("?", "%s"), params or ())
+        return cursor
+
+    def commit(self):
+        self.connection.commit()
+
+    def close(self):
+        self.connection.close()
+
+
 def get_connection():
-    connection = sqlite3.connect(DATABASE_PATH)
-    connection.row_factory = sqlite3.Row
-    return connection
+    return MySQLConnection()
 
 
 def initialize_database():
-
     connection = get_connection()
+    try:
+        connection.execute("""
+            CREATE TABLE IF NOT EXISTS ppg_batches (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                batch_id INT NOT NULL,
+                start_time DOUBLE NOT NULL,
+                sampling_frequency INT NOT NULL,
+                duration_seconds DOUBLE NOT NULL,
+                sample_count INT NOT NULL,
+                samples_json JSON NOT NULL,
+                received_at DATETIME(6) NOT NULL
+            )
+        """)
+        connection.commit()
+    finally:
+        connection.close()
 
-    connection.execute("""
-        CREATE TABLE IF NOT EXISTS ppg_batches (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            batch_id INTEGER NOT NULL,
-            start_time REAL NOT NULL,
-            sampling_frequency INTEGER NOT NULL,
-            duration_seconds INTEGER NOT NULL,
-            sample_count INTEGER NOT NULL,
-            samples_json TEXT NOT NULL,
-            received_at TEXT NOT NULL
-        )
-    """)
 
-    connection.commit()
-    connection.close()
+def decode_samples_json(value):
+    """Return samples as a Python list for MySQL JSON/string results."""
+    if isinstance(value, list):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8")
+    if isinstance(value, str):
+        return json.loads(value)
+    raise ValueError("Unexpected samples_json value returned by MySQL")
 
 
 @app.on_event("startup")
@@ -163,10 +201,10 @@ def receive_ppg_batch(batch: PPGBatch):
             detail="Invalid sampling frequency. Expected 125 Hz."
         )
 
-    if batch.duration_seconds != 0.8:
+    if abs(batch.duration_seconds - 2.0) > 0.001:
         raise HTTPException(
             status_code=400,
-            detail="Invalid batch duration. Expected 0.8 seconds."
+            detail="Invalid batch duration. Expected 2.0 seconds."
         )
 
     if batch.sample_count != len(batch.samples):
@@ -175,19 +213,19 @@ def receive_ppg_batch(batch: PPGBatch):
             detail="Sample count mismatch."
         )
 
-    if batch.sample_count != 100:
+    if batch.sample_count != 250:
         raise HTTPException(
             status_code=400,
-            detail="Expected 100 samples per batch."
+            detail="Expected 250 samples per batch."
         )
 
-    if not 1 <= batch.batch_id <= 5:
+    if not 1 <= batch.batch_id <= 32:
         raise HTTPException(
             status_code=400,
-            detail="Only batch IDs 1 to 5 are accepted."
+            detail="Only batch IDs 1 to 32 are accepted."
         )
 
-    expected_start_time = round((batch.batch_id - 1) * 0.8, 3)
+    expected_start_time = round((batch.batch_id - 1) * 2.0, 3)
 
     if abs(batch.start_time - expected_start_time) > 0.001:
         raise HTTPException(
@@ -217,7 +255,7 @@ def receive_ppg_batch(batch: PPGBatch):
             batch.duration_seconds,
             batch.sample_count,
             json.dumps(batch.samples),
-            datetime.now(timezone.utc).isoformat()
+            datetime.now(timezone.utc).replace(tzinfo=None)
         )
     )
 
@@ -277,7 +315,7 @@ def get_ppg_batches(
                 "sampling_frequency": row["sampling_frequency"],
                 "duration_seconds": row["duration_seconds"],
                 "sample_count": row["sample_count"],
-                "samples": json.loads(row["samples_json"]),
+                "samples": decode_samples_json(row["samples_json"]),
                 "received_at": row["received_at"]
             }
             for row in rows
@@ -317,7 +355,7 @@ def get_latest_ppg_batch():
         "sampling_frequency": row["sampling_frequency"],
         "duration_seconds": row["duration_seconds"],
         "sample_count": row["sample_count"],
-        "samples": json.loads(row["samples_json"]),
+        "samples": decode_samples_json(row["samples_json"]),
         "received_at": row["received_at"]
     }
 
@@ -584,7 +622,7 @@ def calculate_cv_percent(values):
 @app.get("/api/ppg/analysis")
 def get_current_recording_analysis():
 
-    # 1. Load the latest five batches from SQLite
+    # 1. Load the latest 32 batches from MySQL
 
     connection = get_connection()
 
@@ -597,22 +635,22 @@ def get_current_recording_analysis():
             sample_count
         FROM ppg_batches
         ORDER BY id DESC
-        LIMIT 5
+        LIMIT 32
     """).fetchall()
 
     connection.close()
 
     rows.reverse()
 
-    if len(rows) != 5:
+    if len(rows) != 32:
         raise HTTPException(
             status_code=400,
-            detail="A complete five-batch recording is not available."
+            detail="A complete 32-batch recording is not available."
         )
 
     batch_ids = [row["batch_id"] for row in rows]
 
-    if batch_ids != [1, 2, 3, 4, 5]:
+    if batch_ids != list(range(1, 33)):
         raise HTTPException(
             status_code=400,
             detail="Latest database records are not one complete recording."
@@ -620,8 +658,8 @@ def get_current_recording_analysis():
 
     if any(
         row["sampling_frequency"] != 125
-        or row["sample_count"] != 100
-        or abs(row["duration_seconds"] - 0.8) > 0.001
+        or row["sample_count"] != 250
+        or abs(row["duration_seconds"] - 2.0) > 0.001
         for row in rows
     ):
         raise HTTPException(
@@ -865,57 +903,52 @@ async def playback_engine():
 
 @app.websocket("/ws/playback")
 async def playback_websocket(websocket: WebSocket):
-    """Connect dashboards and synchronize playback commands."""
-
+    """One shared playback controller for the server and client dashboards."""
     global playback_task
 
     await websocket.accept()
     connected_playback_clients.add(websocket)
+    print("Playback WebSocket connected; active clients:", len(connected_playback_clients))
 
     if playback_task is None or playback_task.done():
         playback_task = asyncio.create_task(playback_engine())
 
-    await websocket.send_json({
-        "type": "PLAYBACK_STATE",
-        **playback_state
-    })
-
     try:
+        # Send the current state immediately after accepting the connection.
+        await websocket.send_json({"type": "PLAYBACK_STATE", **playback_state})
+
         while True:
             message = await websocket.receive_json()
             action = message.get("action")
 
             if action == "REGISTER":
                 length = int(message.get("waveform_length", 0))
-
                 if length > 0:
+                    first_registration = playback_state["waveform_length"] <= 0
                     playback_state["waveform_length"] = length
-                    playback_state["playback_index"] = min(
-                        playback_state["playback_index"],
-                        length - 1
-                    )
+                    if first_registration:
+                        # Start at the beginning; dashboards render the next window.
+                        playback_state["playback_index"] = 0
+                    else:
+                        playback_state["playback_index"] = min(
+                            playback_state["playback_index"], length - 1
+                        )
 
             elif action == "PLAY":
                 if playback_state["device_on"]:
                     playback_state["is_playing"] = True
-
             elif action == "PAUSE":
                 playback_state["is_playing"] = False
-
             elif action == "STOP":
                 playback_state["is_playing"] = False
                 playback_state["playback_index"] = min(
-                    124,
-                    max(0, playback_state["waveform_length"] - 1)
+                    124, max(0, playback_state["waveform_length"] - 1)
                 )
-
             elif action == "RESET":
                 playback_state["is_playing"] = False
                 playback_state["playback_index"] = 0
-
             elif action == "TOGGLE_DEVICE":
                 playback_state["device_on"] = not playback_state["device_on"]
-
                 if not playback_state["device_on"]:
                     playback_state["is_playing"] = False
 
@@ -923,8 +956,9 @@ async def playback_websocket(websocket: WebSocket):
             await broadcast_playback_state()
 
     except WebSocketDisconnect:
-        connected_playback_clients.discard(websocket)
-
+        print("Playback WebSocket disconnected")
     except Exception as error:
-        print(f"Playback WebSocket error: {error}")
+        print(f"Playback WebSocket error: {type(error).__name__}: {error}")
+    finally:
         connected_playback_clients.discard(websocket)
+        print("Playback WebSocket clients remaining:", len(connected_playback_clients))

@@ -15,11 +15,11 @@ DATASET_PATH = (
 )
 
 SAMPLING_FREQUENCY = 125
-BATCH_DURATION = 0.8
+BATCH_DURATION = 2.0
 SAMPLES_PER_BATCH = int(SAMPLING_FREQUENCY * BATCH_DURATION)
 
-# 50 batches x 100 samples = 5,000 samples = 40 seconds
-MAX_BATCHES = 50
+# 32 batches x 250 samples = 8,000 samples = 64 seconds
+MAX_BATCHES = 32
 
 
 # --------------------------------------------------

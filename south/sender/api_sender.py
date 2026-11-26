@@ -16,7 +16,7 @@ COMPLETE_URL = os.getenv(
     API_URL.rsplit("/", 1)[0] + "/complete"
 )
 
-BATCH_INTERVAL = 0.8
+BATCH_INTERVAL = 2.0
 
 
 def send_batches():

@@ -9,7 +9,7 @@ INPUT_FILE = BASE / "received_ppg_filtered.csv"
 OUTPUT_FILE = BASE / "received_signal_quality.csv"
 
 FS = 125
-WINDOW_SECONDS = 10
+WINDOW_SECONDS = 64
 WINDOW_SAMPLES = FS * WINDOW_SECONDS
 
 

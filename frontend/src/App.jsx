@@ -27,7 +27,7 @@ import {
 
 import "./App.css";
 
-const API_URL = "http://localhost:8000";
+const API_URL = "http://127.0.0.1:8000";
 
 const SAMPLING_FREQUENCY = 125;
 const WINDOW_SECONDS = 10;
@@ -52,7 +52,7 @@ function App() {
   const [waveformLoading, setWaveformLoading] = useState(true);
 
   const [deviceOn, setDeviceOn] = useState(true);
-  const [isPlaying, setIsPlaying] = useState(true);
+  const [isPlaying, setIsPlaying] = useState(false);
 
   const playbackSocketRef = useRef(null);
 
@@ -64,6 +64,14 @@ function App() {
       try {
         const response = await fetch(`${API_URL}/api/ppg/analysis`);
 
+        if (response.status === 400) {
+          // A full 32-batch recording has not arrived yet.
+          if (active) {
+            setAnalysisData(null);
+            setAnalysisError("");
+          }
+          return;
+        }
         if (!response.ok) {
           throw new Error(`Analysis API returned ${response.status}`);
         }
@@ -202,9 +210,11 @@ function App() {
   useEffect(() => {
     if (waveform.length === 0) return;
 
-    const socket = new WebSocket("ws://localhost:8000/ws/playback"); playbackSocketRef.current = socket;
+    const socket = new WebSocket("ws://127.0.0.1:8000/ws/playback");
+    playbackSocketRef.current = socket;
 
     socket.onopen = () => {
+      console.log("Client playback WebSocket connected");
       socket.send(JSON.stringify({
         action: "REGISTER",
         waveform_length: waveform.length,
@@ -234,11 +244,12 @@ function App() {
       }
     };
 
-    socket.onerror = () => {
-      console.error("Playback WebSocket connection error");
+    socket.onerror = (event) => {
+      console.error("Client playback WebSocket connection error:", event);
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
+      console.log("Client playback WebSocket closed:", event.code, event.reason);
       if (playbackSocketRef.current === socket) {
         playbackSocketRef.current = null;
       }
@@ -278,13 +289,12 @@ function App() {
       waveform.length - 1
     );
 
-    const startIndex = Math.max(
-      0,
-      safeIndex - WINDOW_SIZE + 1
-    );
+    // Show the next 10-second window from the shared playback position.
+    // This keeps the waveform visible at RESET (playback index 0).
+    const endIndex = Math.min(waveform.length, safeIndex + WINDOW_SIZE);
 
     return waveform
-      .slice(startIndex, safeIndex + 1)
+      .slice(safeIndex, endIndex)
       .map((point) => ({
         time: point.time_seconds,
         filtered: point.ppg_filtered,

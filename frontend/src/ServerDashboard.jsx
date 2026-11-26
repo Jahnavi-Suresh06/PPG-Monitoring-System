@@ -29,7 +29,7 @@ import {
 
 import "./ServerDashboard.css";
 
-const API_URL = "http://localhost:8000";
+const API_URL = "http://127.0.0.1:8000";
 
 const SAMPLING_FREQUENCY = 125;
 const WINDOW_SECONDS = 10;
@@ -73,6 +73,14 @@ export default function ServerDashboard() {
       try {
         const response = await fetch(`${API_URL}/api/ppg/analysis`);
 
+        if (response.status === 400) {
+          // Expected until all 32 batches have arrived.
+          if (active) {
+            setAnalysisData(null);
+            setAnalysisError("");
+          }
+          return;
+        }
         if (!response.ok) {
           throw new Error(`Analysis API returned ${response.status}`);
         }
@@ -159,8 +167,12 @@ export default function ServerDashboard() {
       try {
         const response = await fetch(`${API_URL}/api/ppg/latest`);
 
+        if (response.status === 404) {
+          if (active) setLatestBatch(null);
+          return;
+        }
         if (!response.ok) {
-          throw new Error("Unable to fetch latest batch");
+          throw new Error(`Latest batch API returned ${response.status}`);
         }
 
         const result = await response.json();
@@ -232,8 +244,8 @@ export default function ServerDashboard() {
   useEffect(() => {
     if (waveform.length === 0) return;
 
-    const socket = new WebSocket("ws://localhost:8000/ws/playback"); playbackSocketRef.current = socket;
-
+    const socket = new WebSocket("ws://127.0.0.1:8000/ws/playback");
+    playbackSocketRef.current = socket;
     socket.onopen = () => {
       socket.send(JSON.stringify({
         action: "REGISTER",
@@ -323,13 +335,12 @@ export default function ServerDashboard() {
       waveform.length - 1
     );
 
-    const startIndex = Math.max(
-      0,
-      safeIndex - WINDOW_SIZE + 1
-    );
+    // Show the next 10-second window from the shared playback position.
+    // This keeps the waveform visible at RESET (playback index 0).
+    const endIndex = Math.min(waveform.length, safeIndex + WINDOW_SIZE);
 
     return waveform
-      .slice(startIndex, safeIndex + 1)
+      .slice(safeIndex, endIndex)
       .map((point) => ({
         time: point.time_seconds,
         amplitude: point.ppg_filtered,
