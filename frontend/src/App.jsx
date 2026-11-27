@@ -39,7 +39,6 @@ const PLAYBACK_INTERVAL = 40;
 function App() {
   const [batches, setBatches] = useState([]);
   const [waveform, setWaveform] = useState([]);
-  const [waveformInfo, setWaveformInfo] = useState(null);
   const [analysisData, setAnalysisData] = useState(null);
 
   const [playbackIndex, setPlaybackIndex] = useState(0);
@@ -180,8 +179,6 @@ function App() {
         }
 
         setWaveform(receivedWaveform);
-        setWaveformInfo(result);
-
         setPlaybackIndex(
           Math.max(
             0,
@@ -318,18 +315,6 @@ function App() {
   const totalPulses =
     analysisData?.pulse_analysis?.detected_pulses ?? "--";
 
-  const medianHeartRate =
-    analysisData?.pulse_analysis?.median_heart_rate_bpm;
-
-  const meanHeartRate =
-    analysisData?.pulse_analysis?.mean_heart_rate_bpm;
-
-  const pulseConsistency =
-    analysisData?.pulse_analysis?.pulse_consistency ?? "--";
-
-  const sqiStatus =
-    analysisData?.sqi?.status ?? "LOADING";
-
   const currentPlaybackTime =
     waveform[playbackIndex]?.time_seconds ?? 0;
 
@@ -371,11 +356,7 @@ function App() {
       <main className="main-content">
         <header className="topbar">
           <div>
-            <p className="eyebrow">PATIENT MONITORING SYSTEM</p>
             <h1>PPG Dashboard</h1>
-            <p className="subtitle">
-              Monitor filtered PPG signals and data transmission
-            </p>
           </div>
 
           <div className="topbar-actions">
@@ -434,47 +415,15 @@ function App() {
           />
         </section>
 
-        {/* ADDITIONAL ANALYSIS */}
-        <section className="metric-grid">
-          <MetricCard
-            icon={<HeartPulse />}
-            label="Median Heart Rate"
-            value={
-              medianHeartRate != null
-                ? `${medianHeartRate.toFixed(2)} BPM`
-                : "--"
-            }
-            note={
-              meanHeartRate != null
-                ? `Mean: ${meanHeartRate.toFixed(2)} BPM`
-                : "Pulse interval analysis"
-            }
-          />
 
-          <MetricCard
-            icon={<Activity />}
-            label="Pulse Consistency"
-            value={pulseConsistency}
-            note="Exploratory CV thresholds"
-          />
-
-          <MetricCard
-            icon={<Gauge />}
-            label="SQI Status"
-            value={sqiStatus}
-            note="Preliminary engineering assessment"
-          />
-        </section>
 
         {/* WAVEFORM AND DETAILS */}
         <section className="content-grid">
           <div className="panel waveform-panel">
             <div className="panel-heading">
               <div>
-                <h2>Filtered PPG Waveform</h2>
-                <p>
-                  Filtered PPG signal · Rolling 10-second window
-                </p>
+                <h2>PPG Waveform</h2>
+
               </div>
 
               <span className="live-label">
@@ -545,14 +494,7 @@ function App() {
 
             {chartData.length > 0 ? (
               <>
-                <div className="waveform-status">
-                  <span className="waveform-indicator" />
-                  <span>FILTERED PPG</span>
 
-                  <span className="waveform-time">
-                    Recording time: {currentPlaybackTime.toFixed(2)} sec
-                  </span>
-                </div>
 
                 <div className="chart-area">
                   <ResponsiveContainer width="100%" height="100%">
@@ -621,15 +563,6 @@ function App() {
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
-
-                <div className="waveform-footer">
-                  Showing {chartData.length.toLocaleString()} filtered PPG
-                  samples
-                  {" · "}
-                  {WINDOW_SECONDS}-second moving window
-                  {" · "}
-                  {samplingFrequency} Hz
-                </div>
               </>
             ) : (
               <div className="empty-state">
@@ -697,63 +630,6 @@ function App() {
               </p>
             )}
           </div>
-        </section>
-
-        {/* SIGNAL QUALITY DETAILS */}
-        <section className="panel">
-          <div className="panel-heading">
-            <div>
-              <h2>Signal Quality Assessment</h2>
-              <p>
-                Preliminary engineering indicators — not clinically
-                validated
-              </p>
-            </div>
-          </div>
-
-          {analysisData ? (
-            <>
-              <div className="pulse-metrics">
-                <div className="pulse-metric">
-                  <span>SQI Status</span>
-                  <strong>{analysisData.sqi.status}</strong>
-                </div>
-
-                <div className="pulse-metric">
-                  <span>Interval CV</span>
-                  <strong>
-                    {analysisData.pulse_analysis.interval_cv_percent != null
-                      ? `${analysisData.pulse_analysis.interval_cv_percent.toFixed(2)}%`
-                      : "--"}
-                  </strong>
-                </div>
-
-                <div className="pulse-metric">
-                  <span>Amplitude CV</span>
-                  <strong>
-                    {analysisData.pulse_analysis.amplitude_cv_percent != null
-                      ? `${analysisData.pulse_analysis.amplitude_cv_percent.toFixed(2)}%`
-                      : "--"}
-                  </strong>
-                </div>
-
-                <div className="pulse-metric">
-                  <span>Filtered Signal Std</span>
-                  <strong>
-                    {analysisData.signal_quality.filtered_std.toFixed(5)}
-                  </strong>
-                </div>
-              </div>
-
-              <p className="muted">
-                {analysisData.sqi.message}
-              </p>
-            </>
-          ) : (
-            <p className="muted">
-              {analysisError || "Loading signal quality assessment..."}
-            </p>
-          )}
         </section>
 
         {/* RECEIVED BATCH HISTORY */}

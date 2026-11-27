@@ -8,7 +8,6 @@ import {
   WifiOff,
   Clock,
   RefreshCw,
-  ChevronDown,
   Play,
   Pause,
   Square,
@@ -40,7 +39,6 @@ export default function ServerDashboard() {
   const [latestBatch, setLatestBatch] = useState(null);
 
   const [waveform, setWaveform] = useState([]);
-  const [waveformInfo, setWaveformInfo] = useState(null);
   const [analysisData, setAnalysisData] = useState(null);
 
   const [playbackIndex, setPlaybackIndex] = useState(0);
@@ -60,7 +58,6 @@ export default function ServerDashboard() {
   const [isPlaying, setIsPlaying] = useState(false);
 
   const [lastUpdated, setLastUpdated] = useState(null);
-  const [showPayload, setShowPayload] = useState(false);
 
   const playbackSocketRef = useRef(null);
   const pendingPlaybackCommandRef = useRef(null);
@@ -220,7 +217,6 @@ export default function ServerDashboard() {
         if (!active) return;
 
         setWaveform(result.waveform || []);
-        setWaveformInfo(result);
         setWaveformError("");
       } catch (err) {
         if (active) {
@@ -350,20 +346,10 @@ export default function ServerDashboard() {
   // CURRENT ANALYSIS METRICS
   const pulseAnalysis = analysisData?.pulse_analysis;
   const recording = analysisData?.recording;
-  const signalQuality = analysisData?.signal_quality;
-  const sqi = analysisData?.sqi;
 
   const totalPulses =
     pulseAnalysis?.detected_pulses ?? "--";
 
-  const medianHeartRate =
-    pulseAnalysis?.median_heart_rate_bpm;
-
-  const pulseConsistency =
-    pulseAnalysis?.pulse_consistency ?? "--";
-
-  const totalSamples =
-    recording?.total_samples ?? "--";
 
   const recordingDuration =
     recording?.duration_seconds != null
@@ -392,7 +378,6 @@ export default function ServerDashboard() {
             <h1>Server Dashboard</h1>
           </div>
 
-          <p>PPG Monitoring System · REST API Server</p>
         </div>
 
         <div className="server-connection">
@@ -427,158 +412,23 @@ export default function ServerDashboard() {
         />
 
         <Metric
-          icon={<HeartPulse />}
-          label="Median Heart Rate"
-          value={
-            medianHeartRate != null
-              ? `${medianHeartRate.toFixed(2)} BPM`
-              : "--"
-          }
-        />
-
-        <Metric
-          icon={<Database />}
-          label="Total Samples"
-          value={
-            typeof totalSamples === "number"
-              ? totalSamples.toLocaleString()
-              : totalSamples
-          }
-        />
-
-        <Metric
           icon={<Activity />}
           label="Signal Duration"
           value={`${recordingDuration} sec`}
         />
-      </section>
 
-      {/* ADDITIONAL ANALYSIS */}
-      <section className="server-card">
-        <div className="server-card-header">
-          <div>
-            <h2>Pulse Analysis</h2>
-            <p>
-              Current recording statistics from the common analysis API
-            </p>
-          </div>
-        </div>
-
-        <div className="server-details-grid">
-          <Detail
-            label="Sampling Frequency"
-            value={`${samplingFrequency} Hz`}
-          />
-
-          <Detail
-            label="Mean Heart Rate"
-            value={
-              pulseAnalysis?.mean_heart_rate_bpm != null
-                ? `${pulseAnalysis.mean_heart_rate_bpm.toFixed(2)} BPM`
-                : "--"
-            }
-          />
-
-          <Detail
-            label="Mean Pulse Interval"
-            value={
-              pulseAnalysis?.mean_interval_seconds != null
-                ? `${pulseAnalysis.mean_interval_seconds.toFixed(4)} sec`
-                : "--"
-            }
-          />
-
-          <Detail
-            label="Pulse Consistency"
-            value={pulseConsistency}
-          />
-
-          <Detail
-            label="Interval CV"
-            value={
-              pulseAnalysis?.interval_cv_percent != null
-                ? `${pulseAnalysis.interval_cv_percent.toFixed(2)}%`
-                : "--"
-            }
-          />
-
-          <Detail
-            label="Amplitude CV"
-            value={
-              pulseAnalysis?.amplitude_cv_percent != null
-                ? `${pulseAnalysis.amplitude_cv_percent.toFixed(2)}%`
-                : "--"
-            }
-          />
-        </div>
-      </section>
-
-      {/* SQI */}
-      <section className="server-card">
-        <div className="server-card-header">
-          <div>
-            <h2>Signal Quality Assessment</h2>
-            <p>
-              Preliminary engineering assessment — not clinically validated
-            </p>
-          </div>
-
-          <span className="server-status-label">
-            {sqi?.status ?? "LOADING"}
-          </span>
-        </div>
-
-        {sqi && signalQuality ? (
-          <>
-            <p>{sqi.message}</p>
-
-            <div className="server-details-grid">
-              <Detail
-                label="SQI Score"
-                value={sqi.score ?? "Not calculated"}
-              />
-
-              <Detail
-                label="Raw Signal Range"
-                value={signalQuality.raw_range.toFixed(5)}
-              />
-
-              <Detail
-                label="Raw Signal Std"
-                value={signalQuality.raw_std.toFixed(5)}
-              />
-
-              <Detail
-                label="Filtered Signal Range"
-                value={signalQuality.filtered_range.toFixed(5)}
-              />
-
-              <Detail
-                label="Filtered Signal Std"
-                value={signalQuality.filtered_std.toFixed(5)}
-              />
-
-              <Detail
-                label="Samples Analysed"
-                value={signalQuality.analyzed_samples}
-              />
-            </div>
-          </>
-        ) : (
-          <div className="server-empty">
-            Loading signal quality assessment...
-          </div>
-        )}
+        <Metric
+          icon={<Database />}
+          label="Sampling Frequency"
+          value={`${samplingFrequency} Hz`}
+        />
       </section>
 
       {/* WAVEFORM */}
       <section className="server-card">
         <div className="server-card-header">
           <div>
-            <h2>Filtered PPG Waveform</h2>
-            <p>
-              Same synchronized waveform displayed on the Client Dashboard
-            </p>
+            <h2>PPG Waveform</h2>
           </div>
 
           <div
@@ -717,20 +567,6 @@ export default function ServerDashboard() {
                 </LineChart>
               </ResponsiveContainer>
             </div>
-
-            <div className="server-chart-footer">
-              <span>
-                Total source samples:{" "}
-                {waveformInfo?.total_samples?.toLocaleString() ??
-                  totalSamples}
-              </span>
-
-              <span>
-                Sampling frequency: {samplingFrequency} Hz
-              </span>
-
-              <span>Window: {WINDOW_SECONDS} seconds</span>
-            </div>
           </>
         ) : (
           <div className="server-empty">
@@ -743,10 +579,7 @@ export default function ServerDashboard() {
       <section className="server-card">
         <div className="server-card-header">
           <div>
-            <h2>Latest Received REST Batch</h2>
-            <p>
-              Actual batch information received and stored by the server
-            </p>
+            <h2>Latest Batch Details</h2>
           </div>
         </div>
 
@@ -795,31 +628,6 @@ export default function ServerDashboard() {
           </div>
         )}
 
-        {latestBatch && (
-          <div className="server-payload-section">
-            <button
-              className="server-payload-toggle"
-              onClick={() => setShowPayload(!showPayload)}
-            >
-              <span>Latest REST Payload (JSON)</span>
-
-              <ChevronDown
-                size={18}
-                style={{
-                  transform: showPayload
-                    ? "rotate(180deg)"
-                    : "rotate(0deg)",
-                }}
-              />
-            </button>
-
-            {showPayload && (
-              <pre className="server-json">
-                {JSON.stringify(latestBatch, null, 2)}
-              </pre>
-            )}
-          </div>
-        )}
       </section>
 
       {/* RECEIVED BATCH HISTORY */}
